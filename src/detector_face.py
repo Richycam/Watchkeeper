@@ -13,15 +13,15 @@ class FaceRecognitionDetector(BaseDetector):
     def __init__(self, feed_id, store, registry, output_dir, face_store: FaceStore):
         super().__init__(feed_id, store, registry, output_dir)
         self._face_store = face_store
-        self._deepface = None
+        self._use_face_recognition = False
         self._haar = None
         self._frame_count = 0
         self._init_backend()
 
     def _init_backend(self):
         try:
-            from deepface import DeepFace
-            self._deepface = DeepFace
+            import face_recognition
+            self._use_face_recognition = True
         except Exception:
             self._haar = cv2.CascadeClassifier(
                 cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -31,14 +31,20 @@ class FaceRecognitionDetector(BaseDetector):
         return "face_recognition"
 
     def get_embedding(self, image_input):
-        if self._deepface is None:
+        if not self._use_face_recognition:
             return None
         try:
-            result = self._deepface.represent(
-                img_path=image_input, model_name="Facenet512",
-                enforce_detection=False, detector_backend="opencv",
-            )
-            return np.array(result[0]["embedding"])
+            import face_recognition
+            # Load image if it's a file path (string), otherwise assume it's already loaded
+            if isinstance(image_input, str):
+                image = face_recognition.load_image_file(image_input)
+            else:
+                # Convert BGR to RGB if it's a numpy array from cv2
+                image = cv2.cvtColor(image_input, cv2.COLOR_BGR2RGB)
+            encodings = face_recognition.face_encodings(image)
+            if len(encodings) > 0:
+                return np.array(encodings[0])
+            return None
         except Exception:
             return None
 
@@ -47,35 +53,38 @@ class FaceRecognitionDetector(BaseDetector):
         if self._frame_count % (self.SKIP_FRAMES + 1) != 0:
             return []
         references = self._face_store.all_references()
-        if self._deepface:
-            return self._detect_deepface(frame, timestamp_seconds, references)
+        if self._use_face_recognition:
+            return self._detect_face_recognition(frame, timestamp_seconds, references)
         return self._detect_haar(frame, timestamp_seconds)
 
-    def _detect_deepface(self, frame, timestamp_seconds, references):
+    def _detect_face_recognition(self, frame, timestamp_seconds, references):
         detections = []
         try:
-            faces = self._deepface.extract_faces(
-                img_path=frame, enforce_detection=False, detector_backend="opencv"
-            )
-            for face_data in faces:
-                region = face_data.get("facial_area", {})
-                x, y, w, h = (region.get("x", 0), region.get("y", 0),
-                               region.get("w", 0), region.get("h", 0))
+            import face_recognition
+            # Convert BGR to RGB for face_recognition
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # face_locations returns (top, right, bottom, left)
+            face_locations = face_recognition.face_locations(rgb_frame)
+            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+            
+            for (top, right, bottom, left), encoding in zip(face_locations, face_encodings):
+                # Convert to (x, y, w, h) format
+                x, y = left, top
+                w, h = right - left, bottom - top
+                
                 if w < 20 or h < 20:
                     continue
-                roi = frame[y:y+h, x:x+w]
-                if roi.size == 0:
-                    continue
-                embedding = self.get_embedding(roi)
-                if embedding is None:
-                    continue
+                
+                embedding = np.array(encoding)
                 best_name, best_score = self._best_match(embedding, references)
+                
                 if best_score >= self.SIMILARITY_THRESHOLD:
                     label = "Match: " + best_name
                     colour = (0, 255, 0)
                 else:
                     label = "Unknown Face"
                     colour = (0, 165, 255)
+                
                 annotated = frame.copy()
                 cv2.rectangle(annotated, (x, y), (x+w, y+h), colour, 2)
                 cv2.putText(annotated, label, (x, max(y - 10, 10)),
