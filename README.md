@@ -158,12 +158,7 @@ Recorded video feeds automatically reach `complete` when the file ends. Live RTS
 - Works on recorded video files. CPU only — no GPU required.
 
 ### Face Recognition
-- Uses DeepFace with the Facenet512 model to generate 512-dimensional face embeddings.
-- Compares detected faces against reference faces you have uploaded via the TUI.
-- A cosine similarity score ≥ 0.55 counts as a match and is labelled with the reference person's name.
-- Faces below threshold are logged as "Unknown Face".
-- Falls back to OpenCV Haar Cascade detection (detects faces but cannot identify them) if DeepFace is unavailable.
-- **Note:** DeepFace downloads the Facenet512 model weights (~90 MB) on first run. Subsequent runs use the cached version.
+- project orginally used Deep face deprciated, now using face_recognition
 
 ### ANPR (Licence Plate Recognition)
 - Uses EasyOCR to read text from candidate regions in each frame.
